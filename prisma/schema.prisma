@@ -1,0 +1,277 @@
+// Prisma — RunMotos
+// Banco: MySQL (Laragon). A loja lê os produtos daqui (rápido);
+// a Laquila é a FONTE que importamos/sincronizamos pelo painel.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Regra de promoção. Hoje: "brinde por lucro" — produtos com lucro >= minProfit
+// ganham um produto-brinde (giftProductId) exibido na página do produto.
+model Promotion {
+  id            String   @id @default(cuid())
+  name          String
+  type          String   @default("gift_by_profit")
+  active        Boolean  @default(true)
+  minProfit     Float    @default(0) // lucro mínimo em R$ para qualificar
+  giftProductId String? // produto dado de brinde
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active])
+}
+
+// Cliente da loja (conta criada automaticamente na compra; login por código no e-mail).
+model Customer {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  cpf           String?
+  phone         String?
+  cep           String?
+  address       String?
+  addressNumber String?
+  city          String?
+  uf            String?
+  orders        Order[]
+  reviews       Review[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Avaliação de produto (só quem comprou pode avaliar).
+model Review {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating     Int // 1 a 5
+  comment    String?  @db.Text
+  authorName String?
+  createdAt  DateTime @default(now())
+
+  @@unique([productId, customerId]) // uma avaliação por cliente/produto
+  @@index([productId])
+}
+
+// Código de login (OTP) enviado por e-mail. Expira e tem limite de tentativas.
+model LoginCode {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+// Pedido feito na NOSSA loja (não vai automático para a Laquila).
+// O envio à Laquila é uma ação manual, posterior (campos laquila* abaixo).
+model Order {
+  id         String    @id @default(cuid())
+  number     Int       @unique // número amigável do pedido (sequencial)
+  status     String    @default("aguardando_pagamento") // aguardando_pagamento | pago | cancelado | enviado_laquila | entregue
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  // Cliente
+  customerName String
+  cpf          String
+  email        String
+  phone        String?
+
+  // Entrega
+  cep           String?
+  address       String?
+  addressNumber String?
+  city          String?
+  uf            String?
+
+  // Valores
+  subtotal       Float
+  shipping       Float   @default(0)
+  shippingMethod String?
+  total          Float
+  discount       Float   @default(0) // desconto aplicado (ex.: PIX) sobre o total
+
+  // Pagamento
+  paymentMethod String? // ex.: "paypal_card"
+  paymentId     String? // id da transação no PayPal
+  installments  Int? // nº de parcelas
+  paidAt        DateTime?
+
+  // Envio à Laquila (futuro / manual)
+  laquilaOrderId  String?
+  sentToLaquilaAt DateTime?
+
+  items     OrderItem[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([status])
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  cdItem      String // SKU da variação (o que a Laquila precisa)
+  productName String
+  size        String?
+  qty         Int
+  price       Float
+
+  @@index([orderId])
+}
+
+// Tabela de tamanhos (vinculada a categorias/subcategorias).
+model SizeChart {
+  id           String   @id @default(cuid())
+  name         String
+  measureLabel String   @default("Medida do peito (cm)")
+  data         String   @db.Text // JSON: [{ min, max, universal, europa, brasil }]
+  categories   String   @db.Text // JSON: ["Jaquetas Femininas", ...] (categoria ou subcategoria)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Configurações da loja (linha única, id = 1).
+model Setting {
+  id            Int      @id @default(1)
+  markupPercent Float    @default(0) // % aplicado sobre o custo ao importar (0 = usa preço sugerido/custo)
+
+  // Identidade / informações da loja
+  storeName    String  @default("RunMotos")
+  logoUrl      String? @db.Text
+  contactEmail String?
+  contactPhone String?
+  whatsapp     String?
+  address      String?
+  instagram    String?
+  facebook     String?
+  youtube      String?
+  originCep    String? // CEP de origem dos envios (frete)
+
+  // Categorias exibidas na página inicial (JSON de nomes, na ordem escolhida).
+  // Vazio/null = mostrar todas automaticamente (por quantidade).
+  homeCategories String? @db.Text
+
+  // % de desconto à vista no PIX (sobre os produtos).
+  pixDiscountPct Float @default(5)
+
+  updatedAt DateTime @updatedAt
+}
+
+// Registro de cada sincronização de ESTOQUE pela API da Laquila (00006).
+model StockSyncLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  source    String   @default("manual") // manual | cron
+  ok        Boolean  @default(false)
+  checked   Int      @default(0) // itens recebidos da API
+  updated   Int      @default(0) // variações com estoque alterado
+  notFound  Int      @default(0) // SKUs da API que não existem no catálogo
+  message   String?  @db.Text
+  details   String?  @db.Text // JSON: [{ cdItem, de, para }]
+
+  @@index([createdAt])
+}
+
+// Categoria DESCOBERTA a partir da API da Laquila.
+// A API só devolve códigos de grupo (cd_ggrupo/cd_grupo/cd_sgrupo), sem nome.
+// Por isso `code` guarda o código real e `name` é o nome amigável que VOCÊ define.
+model Category {
+  id            String   @id @default(cuid())
+  code          String   @unique // cd_grupo vindo da Laquila
+  name          String // nome amigável (editável; a API não fornece nome)
+  slug          String   @unique
+  tagline       String   @default("")
+  level         String   @default("grupo") // ggrupo | grupo | sgrupo
+  importEnabled Boolean  @default(true) // importar produtos deste grupo?
+  isDefault     Boolean  @default(false) // categoria padrão p/ itens sem grupo reconhecido
+  active        Boolean  @default(true) // exibir na loja?
+  productCount  Int      @default(0) // quantos itens deste grupo foram vistos na descoberta
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Produto exibido na loja (1 por nome-base + cor). As variações (tamanhos)
+// ficam em Variant, cada uma com seu SKU/estoque/preço.
+model Product {
+  id           String  @id @default(cuid())
+  baseKey      String  @unique // chave de agrupamento (nome-base + cor), já inclui a cor
+  slug         String  @unique
+  name         String // nome amigável (rascunho automático, editável)
+  rawName      String? // Descrição original da planilha (coluna C)
+  description  String  @db.Text // texto exibido (compl. + características, editável)
+  descricaoComplementar String? @db.Text // Descrição complementar (F)
+  caracteristicas       String? @db.Text // Características (G)
+  brand        String  @default("RunMotos") // marca = sub-grupo (AB)
+  categorySlug String  @default("sem-categoria")
+  grupoCode    String? // liga à Category (= marca AB)
+  grupo        String? // Descrição grupo (AA)
+  grandeGrupo  String? // Descrição grande grupo (Z)
+  color        String? // cor deste produto (G)
+
+  // Categorias de TIPO (atribuídas por IA / editáveis). Ex.: "Jaquetas" > "Jaquetas Femininas".
+  categoria    String? // categoria (nível 1)
+  subcategoria String? // subcategoria (nível 2)
+  image        String  @db.Text
+  gallery      String? @db.Text
+  ncm          String?
+  cest         String?
+  unidade      String?
+  rating       Float   @default(4.5)
+  reviews      Int     @default(0)
+  active       Boolean @default(true)
+  bestSeller   Boolean @default(false)
+  reviewed     Boolean @default(false) // nome já revisado por você?
+
+  variants   Variant[]
+  reviewList Review[]
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([categorySlug])
+  @@index([grupoCode])
+  @@index([categoria])
+  @@index([active])
+}
+
+// Variação = uma linha da planilha (1 SKU). Eixo: tamanho.
+model Variant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  cdItem        String  @unique // SKU (Cod. item B)
+  size          String? // Tamanho (H)
+  color         String? // Cor (G)
+  ean           String? // Cod. ean (D)
+  price         Float // venda (sugerido ou custo + markup)
+  cost          Float? // Vl custo (Q)
+  valorSugerido Float? // Vl sugerido (R)
+  stock         Int     @default(0) // Saldo (S)
+
+  pesoLiquido      Float?
+  pesoBruto        Float?
+  larguraCaixa     Float?
+  alturaCaixa      Float?
+  comprimentoCaixa Float?
+  m3Caixa          Float?
+
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([productId])
+}
