@@ -1,0 +1,5 @@
+# Build no Coolify/Nixpacks.
+# Usa "npm install" (tolerante) em vez do "npm ci" (estrito com o lock),
+# evitando a falha de build quando o lock difere levemente do ambiente do servidor.
+[phases.install]
+cmds = ["npm install --no-audit --no-fund"]
