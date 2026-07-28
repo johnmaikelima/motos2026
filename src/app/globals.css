@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0c0f;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg);
+  color: #e7e9ec;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .container-rm {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-lime px-6 py-3
+           text-sm font-bold uppercase tracking-wide text-black transition
+           hover:bg-lime-400 hover:shadow-[0_0_24px_-4px_rgba(196,240,0,0.6)]
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-lime focus-visible:ring-offset-2 focus-visible:ring-offset-ink;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-lime/60
+           px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-lime transition
+           hover:bg-lime hover:text-black;
+  }
+
+  .card {
+    @apply rounded-xl border border-white/5 bg-ink-800/70 backdrop-blur;
+  }
+
+  .heading-display {
+    @apply font-display font-extrabold uppercase italic tracking-tight;
+  }
+}
+
+/* Scrollbar discreta no tema escuro */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a313b;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0d1014;
+}
+
+/* ---- Animações do card de brinde ---- */
+@keyframes rm-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+@keyframes rm-glow {
+  0%, 100% { opacity: 0.35; transform: scale(0.98); }
+  50% { opacity: 0.8; transform: scale(1.06); }
+}
+@keyframes rm-glowshadow {
+  0%, 100% { box-shadow: 0 0 18px -6px rgba(196, 240, 0, 0.45); }
+  50% { box-shadow: 0 0 34px -2px rgba(196, 240, 0, 0.85); }
+}
+@keyframes rm-shine {
+  0% { transform: translateX(-150%) skewX(-18deg); }
+  55%, 100% { transform: translateX(360%) skewX(-18deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rm-anim, .rm-anim * { animation: none !important; }
+}
